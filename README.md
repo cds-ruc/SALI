@@ -18,3 +18,6 @@ Run example:
 ```bash
 ./build/example_mt
 ```
+## Usage
+
+`src/examples/example_multithread.cpp` shows how to use sali in multithread environment.

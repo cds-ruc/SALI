@@ -14,6 +14,6 @@ include_directories(${TBB_INCLUDE_DIRS})
 include_directories(src/core)
 
 
-add_executable(example_mt src/examples/example_mt.cpp)
+add_executable(example_mt src/examples/example_multithread.cpp)
 
 target_link_libraries(example_mt PUBLIC TBB::tbb OpenMP::OpenMP_CXX )
