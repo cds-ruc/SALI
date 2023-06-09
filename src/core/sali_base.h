@@ -39,12 +39,12 @@ public:
 
     inline int predict(T key) const
     {
-        return std::floor(a * static_cast<long double>(key) + b);
+      return std::floor(a * static_cast<long double>(key) + b);
     }
 
     inline double predict_double(T key) const
     {
-        return a * static_cast<long double>(key) + b;
+      return a * static_cast<long double>(key) + b;
     }
     inline void clear(){
       a=b=0;
@@ -59,6 +59,7 @@ template <class T>
 class TwoLinearModel
 {
 public:
+    int type=0;
     long double mid =0;
     long double a1 = 0; // slope
     long double b1 = 0; // intercept
@@ -71,6 +72,9 @@ public:
 
     inline int predict(T key) const
     {
+      if(type==0){
+        return std::floor(a1 * static_cast<long double>(key) + b1);
+      }
       if(static_cast<long double>(key)<mid){
         return std::floor(a1 * static_cast<long double>(key) + b1);
       }
@@ -79,6 +83,9 @@ public:
 
     inline double predict_double(T key) const
     {
+      if(type==0){
+        return a1 * static_cast<long double>(key) + b1;
+      }
       if(static_cast<long double>(key)<mid) {
         return a1 * static_cast<long double>(key) + b1;
       }
@@ -88,9 +95,12 @@ public:
       a1=b1=a2=b2=mid=0;
     }
     inline void train_two(long double mid1_key,long double mid2_key,long double mid1_target,long double mid2_target){
-      a1= a2= (mid2_target - mid1_target) / (mid2_key - mid1_key);
+      a1 = (mid2_target - mid1_target) / (mid2_key - mid1_key);
+      b1 = mid1_target - a1 * mid1_key;
+      type=0;
+      /*a1= a2= (mid2_target - mid1_target) / (mid2_key - mid1_key);
       b1= b2= mid1_target - a1 * mid1_key;
-      mid=(mid1_key+mid2_key)/2;
+      mid=(mid1_key+mid2_key)/2;*/
     }
 };
 
