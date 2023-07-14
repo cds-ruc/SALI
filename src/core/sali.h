@@ -32,11 +32,12 @@
 
 namespace sali {
 
-#define READ_EVOLVE 1
+#define READ_EVOLVE 0
+#define COMPRESS 0
 static thread_local int skip_counter = 0;
 static std::atomic_int64_t allocated = 0;
-static std::atomic_int64_t compressed = 0;
-static std::atomic_int64_t freed = 0;
+static std::atomic_int64_t num_compressed_node = 0;
+static std::atomic_int64_t freed_size = 0;
 static int max_ratio = 0;
 
 // runtime assert
@@ -371,7 +372,7 @@ public:
       dummy_tail_.prev_ = &dummy_head_;
       pool_size_ = 0;
 
-
+#if COMPRESS
       if (memory_budget_ == 0) {
         long pages = sysconf(_SC_PHYS_PAGES);
         long page_size = sysconf(_SC_PAGE_SIZE);
@@ -379,18 +380,21 @@ public:
       }
       std::cout << "memory_budget: " << memory_budget_ << std::endl;
       th = std::thread(&sali::SALI<T, P>::threadFunction, this);
+#endif
     }
 
     ~SALI() {
       std::cout << "SALI Destruct." << std::endl;
 
+#if COMPRESS
       exitSignal = 1;
       compress_cv_.notify_one();
       th.join();
+#endif
       delete ebr;
       std::cout << "pool " << pool_size_ << std::endl;
-      std::cout << "freed " << freed << std::endl;
-      std::cout << "compressed " << compressed << std::endl;
+      std::cout << "num_compressed_node " << num_compressed_node << std::endl;
+      std::cout << "freed_size " << freed_size << std::endl;
       std::cout << "total_size " << total_size() << std::endl;
       destroy_tree(root);
       root = NULL;
@@ -401,8 +405,6 @@ public:
         delete cur;
         cur = temp;
       }
-
-      std::cout << std::to_string(allocated.load()) << std::endl;
     }
 
     void insert(const V &v) { insert(v.first, v.second); }
@@ -740,27 +742,15 @@ public:
       destroy_tree(root);
       bulk_args args = {num_keys, 0.001, timeSinceEpochNanosec(), 1, 1};
       root = build_tree_bulk(keys, values, args);
-      /*for (int i = 0; i < root->num_items; i++) {
+#if COMPRESS
+      for (int i = 0; i < root->num_items; i++) {
         if (root->items[i].entry_type == 1
             && root->items[i].comp.child->num_items >= 64) {
           //std::cout << "push_to_cooling_pool, new_node: " << root->items[i].comp.child << std::endl;
           push_to_cooling_pool(root, root->items[i].comp.child);
         }
-      }*/
-      /*push_to_cooling_pool(nullptr, root);
-      compress_cv_.notify_one();
-      yield(4);
-      std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-      compress_cv_.notify_one();
-      std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-      for(int i=0;i<root->num_items;i++){
-        std::cout << "root: " << root->items[i].comp.data.key << std::endl;
-      }*/
-      /*push_to_cooling_pool(nullptr, root);
-      compress_cv_.notify_one();
-      yield(4);
-      std::this_thread::sleep_for(std::chrono::milliseconds(60000));
-      std::cout << "root: " << root->last_adjust_type << std::endl;*/
+      }
+#endif
       delete keys;
       delete values;
     }
@@ -1288,7 +1278,6 @@ private:
 
       std::unique_lock <std::mutex> latch(compress_mu_);
       while (exitSignal == 0) {
-        //std::cout << "Compress Thread Start1" << std::endl;
         compress_cv_.wait(latch);
         //std::cout << "Compress Thread Start2" << std::endl;
         NodePair nodePair;
@@ -1370,11 +1359,10 @@ private:
             }
             nodePair.parent_->items[pos].comp.child = new_node;
             nodePair.parent_->items[pos].writeUnlock();
-            compressed += numKeysCollected;
+            num_compressed_node += numKeysCollected;
           }
           return;
         }
-        std::cout << "Doing Compress 1" << std::endl;
 
         auto ret = victim_from_cooling_pool(&nodePair);
         if (ret == false) {
@@ -1382,7 +1370,7 @@ private:
           continue;
         }
         if (nodePair.parent_ == nullptr) {
-          std::cout << "Doing Compress Root 1" << std::endl;
+          std::cout << "Doing Compress Root" << std::endl;
         }
         Node *child = nodePair.child_;
         std::vector <T> *keys;
@@ -1464,7 +1452,7 @@ private:
         }
         nodePair.parent_->items[pos].comp.child = new_node;
         nodePair.parent_->items[pos].writeUnlock();
-        compressed += numKeysCollected;
+        num_compressed_node += numKeysCollected;
         //std::cout << "numKeysCollected: " << numKeysCollected << std::endl;
         //std::cout << "numKeysCollected: " << new_node << std::endl;
         //std::cout << "Compress Thread Done" << std::endl;
@@ -1557,7 +1545,7 @@ private:
 
     }
 
-    EpochBasedMemoryReclamationStrategy *initEbrInstance(SALI<T, P> *index) {
+    EpochBasedMemoryReclamationStrategy *initEbrInstance(LIPP<T, P> *index) {
       ebr = new EpochBasedMemoryReclamationStrategy(index);
       return ebr;
     }
@@ -3249,24 +3237,22 @@ private:
                    path[i - 1]);
           node_prob_prev->items[pos].comp.child = new_node;
           node_prob_prev->items[pos].writeUnlock();
-          /*if (cool_select_distribution(getGen())) {
+#if COMPRESS
+          if (cool_select_distribution(getGen())) {
+            if ((!new_node->fixed) && new_node->num_items >= 64 ) {
+            //std::cout << "push_to_cooling_pool, new_node: " << new_node << std::endl;
+            push_to_cooling_pool(node_prob_prev, new_node);
+            }
             long allocated = 0;
             for (int i = 0; i < 1024; i++) {
               allocated += al[i].field;
             }
-            if (allocated > 0) {
-              //std::cout << "allocated > memory_budget_, allocated: " << allocated << std::endl;
-              //compress_cv_.notify_all();
-              //compress();
+            if (allocated > memory_budget_) {
+              std::cout << "allocated > memory_budget_, allocated: " << allocated << std::endl;
+              compress_cv_.notify_all();
             }
-          }*/
-          //&& cool_select_distribution(getGen())
-          /*if ((!new_node->fixed) && new_node->num_items >= 64 ) {
-            //std::cout << "push_to_cooling_pool, new_node: " << new_node << std::endl;
-            push_to_cooling_pool(node_prob_prev, new_node);
-          }*/
-          //adjustsuccess++;
-          RT_DEBUG("Adjusted success=%d", adjustsuccess);
+          }
+#endif
         } else { // new node is the root, need to update it
           root = new_node;
         }
