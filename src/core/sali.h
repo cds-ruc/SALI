@@ -32,6 +32,7 @@
 
 namespace sali {
 
+#define READ_EVOLVE 1
 static thread_local int skip_counter = 0;
 static std::atomic_int64_t allocated = 0;
 static std::atomic_int64_t compressed = 0;
@@ -286,8 +287,8 @@ public:
               for (int i = 0; i < node->num_items; i++) node->items[i].entry_type = 0;
               tree->pending_two[omp_get_thread_num()].push(node);
             } else {
-              freed+=node->num_items*sizeof(Item);
-              freed+=sizeof(Node);
+              freed += node->num_items * sizeof(Item);
+              freed += sizeof(Node);
               tree->delete_items(node->items, node->num_items);
               tree->delete_nodes(node, 1);
             }
@@ -523,17 +524,12 @@ public:
       Node *parent = nullptr;
 
       constexpr int MAX_DEPTH = 128;
-      //Node *path[MAX_DEPTH];
+      Node *path[MAX_DEPTH];
       int path_size = 0;
-      int num_fixed = 0;
+      //int num_fixed = 0;
       bool ret = false;
       for (Node *node = root;;) {
-        /*RT_ASSERT(path_size < MAX_DEPTH);
-        if (node->fixed == 1) {
-          num_fixed++;
-        }
-        path[path_size++] = node;*/
-
+        path[path_size++] = node;
         int pos = PREDICT_POS(node, key);
         versionItem = node->items[pos].readLockOrRestart(needRestart);
         if (needRestart)
@@ -622,69 +618,17 @@ public:
           }
         }
       }
-      /*if (++skip_counter== skip_length) {
-        if(pq_distribution(get_generator())){
-          std::cout<<"pq_distribution(get_generator())"<<std::endl;
-        }
-        skip_counter = 0;
-      }*/
-      return ret;
-      /*if (likely(path_size - num_fixed <= 3)) {
-        return ret;
-      }*/
-      /*if (likely(path_size <= 100)) {
-        return ret;
-      }*/
-      /*if(pq_distribution(getGen())){
-        pq_trigger=true;
-        cur_time = time(0);
-      }*/
-      /*auto temp = getGen()();
 
-      int mask = 0xffff;
-      if (likely((temp & mask) != (path[path_size - 1]->build_time & mask))) {
-        return ret;
-      }
-      uint64_t cur_time = 0;
-      Node *node_prob_prev = nullptr;
-      Node *node_prob_cur = nullptr;
-      bool pq_trigger = true;
-      cur_time = timeSinceEpochNanosec();
-      if (pq_trigger) {
-        for (int i = 0; i < path_size - 1; i++) {
-          Node *node = path[i];
-          if (node->fixed == 0 && node->last_adjust_type == 1 &&
-              node->build_time != cur_time) {
-            //epsilon=0.0001
-            long double p_acc = (node->speed * (cur_time - node->build_time) + 0.0001) / node->build_size;
-            if (p_acc >= 1) {
-              node_prob_prev = i == 0 ? nullptr : path[i - 1];
-              node_prob_cur = node;
-              *//*std::cout << "+++++++++++++++ " << p_acc << std::endl;
-              std::cout << "+++++++++++++++ " << node->speed << std::endl;*//*
-              break;
-            } else {
-              std::bernoulli_distribution acc_distribution(p_acc);
-              if (acc_distribution(getGen())) {
-                node_prob_prev = i == 0 ? nullptr : path[i - 1];
-                node_prob_cur = node;
-                //std::cout << "+++++++++++++++ " << p_acc << std::endl;
-                break;
-              }
-            }
-          }
-        }
 
-      }
-      *//*if (path[path_size - 1] == node_prob_cur) {
-        return ret;
-      }*//*
-      if (likely(node_prob_cur == nullptr)) {
+#if READ_EVOLVE
+      if (likely(path_size <= 3 || !pq_distribution(getGen()) || path[1]->last_adjust_type == 2)) {
         return ret;
       }
-      num_read_probability_trigger++;
+
+      Node *node_prob_cur = path[1];
       int prev_size = node_prob_cur->build_size;
       uint64_t prev_build_time = node_prob_cur->build_time;
+      long double prev_speed = node_prob_cur->speed;
       // const int ESIZE = node->size; //race here
       // T *keys = new T[ESIZE];
       // P *values = new P[ESIZE];
@@ -692,85 +636,50 @@ public:
       // to decide the size after getting the locks
       std::vector <P> *values; // scan_and_destroy will fill up the keys/values
 
-#if COLLECT_TIME
-      auto start_time_scan = std::chrono::high_resolution_clock::now();
-#endif
+      if (prev_size < 64) {
+        int t_size = count_tree_size(node_prob_cur);
+        if (t_size < 64) {
+          return ret;
+        }
+      }
+      num_read_probability_trigger++;
 
       int numKeysCollected = scan_and_destory_tree(
           node_prob_cur, &keys, &values); // pass the (address) of the ptr
       if (numKeysCollected < 0) {
-        for (int x = 0; x < numKeysCollected; x++) {
-          delete keys; // keys[x] stores keys
-          delete values;
-        }
-        RT_DEBUG("collectKey for adjusting node %p -- one Xlock fails; quit "
-                 "rebuild",
-                 node);; // give up rebuild on this node (most likely other threads have
-        // done it for you already)
-        return ret;
+        return true;
       }
-#if COLLECT_TIME
-      auto end_time_scan = std::chrono::high_resolution_clock::now();
-    auto duration_scan = end_time_scan - start_time_scan;
-    stats.time_scan_and_destory_tree +=
-        std::chrono::duration_cast<std::chrono::nanoseconds>(duration_scan)
-            .count() *
-        1e-9;
-#endif
 
-#if COLLECT_TIME
-      auto start_time_build = std::chrono::high_resolution_clock::now();
-#endif
-      long double speed = (long double) (numKeysCollected - prev_size) / (cur_time - prev_build_time);
-      Node *new_node = build_tree_bulk(keys, values, numKeysCollected, speed, cur_time, 0);
-#if COLLECT_TIME
-      auto end_time_build = std::chrono::high_resolution_clock::now();
-    auto duration_build = end_time_build - start_time_build;
-    stats.time_build_tree_bulk +=
-        std::chrono::duration_cast<std::chrono::nanoseconds>(duration_build)
-            .count() *
-        1e-9;
-#endif
+      uint64_t cur_time = timeSinceEpochNanosec();
+      long double speed = (long double) (numKeysCollected - prev_size) / (cur_time - prev_build_time + 1);
+      bulk_args args = {numKeysCollected, speed, cur_time, 2, speed / prev_speed};
+
+      Node *new_node = build_tree_bulk_two_model(keys, values, args);
+
 
       delete keys;
       delete values;
+      Node *node_prob_prev = path[0];
 
-      RT_DEBUG(
-          "Final step of adjust, try to update parent/root, new node is %p",
-          node);
+      int retryLockCount = 0;
+      retryLock:
+      if (retryLockCount++)
+        yield(retryLockCount);
 
-      //path[i] = new_node;
-      if (node_prob_prev != nullptr) {
+      int pos = PREDICT_POS(node_prob_prev, key);
 
-        int retryLockCount = 0;
-        retryLock:
-        if (retryLockCount++)
-          yield(retryLockCount);
+      bool needRetry = false;
 
-        int pos = PREDICT_POS(node_prob_prev, key);
-
-        bool needRetry = false;
-
-        node_prob_prev->items[pos].writeLockOrRestart(needRetry);
-        if (needRetry) {
-          RT_DEBUG("Final step of adjust, obtain parent %p lock FAIL, retry",
-                   path[i - 1]);
-          goto retryLock;
-        }
-        RT_DEBUG("Final step of adjust, obtain parent %p lock OK, now give "
-                 "the adjusted tree to parent",
+      node_prob_prev->items[pos].writeLockOrRestart(needRetry);
+      if (needRetry) {
+        RT_DEBUG("Final step of adjust, obtain parent %p lock FAIL, retry",
                  path[i - 1]);
-        node_prob_prev->items[pos].comp.child = new_node;
-        node_prob_prev->items[pos].writeUnlock();
-        RT_DEBUG("Adjusted success=%d", adjustsuccess);
-      } else { // new node is the root, need to update it
-        root = new_node;
+        goto retryLock;
       }
-
-      //Probability Rebuild End
-
-      return ret;*/
-
+      node_prob_prev->items[pos].comp.child = new_node;
+      node_prob_prev->items[pos].writeUnlock();
+#endif
+      return ret;
 
     }
 
@@ -1041,11 +950,11 @@ public:
       std::cout << "==============================================" << std::endl;
     }
 
-    long adjust_num(){
+    long adjust_num() {
       return num_write_probability_trigger;
     }
 
-    std::tuple<long,double,long> depth(){
+    std::tuple<long, double, long> depth() {
       std::stack < Node * > s;
       std::stack<int> d;
       s.push(root);
@@ -1069,7 +978,7 @@ public:
           }
         }
       }
-      return std::tuple<long,double,long>(max_depth,double(sum_depth) / double(sum_nodes),sum_nodes);
+      return std::tuple<long, double, long>(max_depth, double(sum_depth) / double(sum_nodes), sum_nodes);
     }
 
 private:
@@ -1101,7 +1010,7 @@ private:
         long double speed;
         int last_adjust_type = 1;
         int cooling = 0;
-        LinearModel<T> model;
+        TwoLinearModel<T> model;
     };
 
 
@@ -1239,7 +1148,7 @@ private:
     uint32_t temp = 0xfffff;
     std::vector <std::vector<uint32_t>> p_array;
     std::vector <std::discrete_distribution<int>> d_array;
-    std::bernoulli_distribution pq_distribution{0};
+    std::bernoulli_distribution pq_distribution{0.00001};
     std::bernoulli_distribution rq_distribution{0.00001};
 
     std::atomic<int> exitSignal = 0;
@@ -1384,7 +1293,7 @@ private:
         //std::cout << "Compress Thread Start2" << std::endl;
         NodePair nodePair;
         if (exitSignal == 1) {
-          while(victim_from_cooling_pool(&nodePair)){
+          while (victim_from_cooling_pool(&nodePair)) {
             //std::cout << "Doing Compress" << std::endl;
             Node *child = nodePair.child_;
             std::vector <T> *keys;
@@ -1415,8 +1324,9 @@ private:
             //pgm auto[cs_slope, cs_intercept] = cs.get_floating_point_segment(cs.get_first_x());
             auto[cs_slope, cs_intercept] = cs.get_floating_point_segment(0);
             //new_node->model.params[segment_idx]=model_param(cs_slope,cs_intercept);
-            new_node->model.a = cs_slope;
-            new_node->model.b = cs_intercept;
+            new_node->model.type = 0;
+            new_node->model.a1 = cs_slope;
+            new_node->model.b1 = cs_intercept;
             //segment_idx++;
             //start = i;
             //opt.add_point((*keys)[i], i-start);
@@ -1460,7 +1370,7 @@ private:
             }
             nodePair.parent_->items[pos].comp.child = new_node;
             nodePair.parent_->items[pos].writeUnlock();
-            compressed+=numKeysCollected;
+            compressed += numKeysCollected;
           }
           return;
         }
@@ -1471,7 +1381,7 @@ private:
           //std::cout << "Nothing Compress" << std::endl;
           continue;
         }
-        if(nodePair.parent_== nullptr){
+        if (nodePair.parent_ == nullptr) {
           std::cout << "Doing Compress Root 1" << std::endl;
         }
         Node *child = nodePair.child_;
@@ -1503,8 +1413,9 @@ private:
         //pgm auto[cs_slope, cs_intercept] = cs.get_floating_point_segment(cs.get_first_x());
         auto[cs_slope, cs_intercept] = cs.get_floating_point_segment(0);
         //new_node->model.params[segment_idx]=model_param(cs_slope,cs_intercept);
-        new_node->model.a = cs_slope;
-        new_node->model.b = cs_intercept;
+        new_node->model.type = 0;
+        new_node->model.a1 = cs_slope;
+        new_node->model.b1 = cs_intercept;
         //segment_idx++;
         //start = i;
         //opt.add_point((*keys)[i], i-start);
@@ -1538,8 +1449,8 @@ private:
         if (retryLockCount++)
           yield(retryLockCount);
 
-        if(nodePair.parent_== nullptr){
-          root=new_node;
+        if (nodePair.parent_ == nullptr) {
+          root = new_node;
           std::cout << "Doing Compress Root" << std::endl;
           continue;
         }
@@ -1553,7 +1464,7 @@ private:
         }
         nodePair.parent_->items[pos].comp.child = new_node;
         nodePair.parent_->items[pos].writeUnlock();
-        compressed+=numKeysCollected;
+        compressed += numKeysCollected;
         //std::cout << "numKeysCollected: " << numKeysCollected << std::endl;
         //std::cout << "numKeysCollected: " << new_node << std::endl;
         //std::cout << "Compress Thread Done" << std::endl;
@@ -1756,10 +1667,10 @@ private:
       { // insert key1&value1
         int pos = PREDICT_POS(node, key1);
         //std::cout<<"insert key1&value1 "<<pos<<" "<<key1<<std::endl;
-        if(node->items[pos].entry_type != 0){
-          std::cout<<"node->items[pos].entry_type "<<pos<<std::endl;
-          std::cout<<"node->items[pos].entry_type "<<node<<std::endl;
-          std::cout<<"node->items[pos].entry_type "<<node->items[pos].entry_type<<std::endl;
+        if (node->items[pos].entry_type != 0) {
+          std::cout << "node->items[pos].entry_type " << pos << std::endl;
+          std::cout << "node->items[pos].entry_type " << node << std::endl;
+          std::cout << "node->items[pos].entry_type " << node->items[pos].entry_type << std::endl;
         }
         RT_ASSERT(node->items[pos].entry_type == 0);
         node->items[pos].entry_type = 2;
@@ -1801,7 +1712,12 @@ private:
     /// bulk build, _keys must be sorted in asc order.
     Node *
     build_tree_bulk(std::vector <T> *_keys, std::vector <P> *_values, bulk_args &args) {
+#if READ_EVOLVE
+      args._type=2;
+      return build_tree_bulk_two_model(_keys, _values, args);
+#else
       return build_tree_bulk_fmcd(_keys, _values, args);
+#endif
       /*if (USE_FMCD) {
         return build_tree_bulk_fmcd(_keys, _values, _size);
       } else {
@@ -2221,6 +2137,169 @@ private:
       return ret;
     }
 
+    Node *
+    build_tree_bulk_two_model(std::vector <T> *_keys, std::vector <P> *_values, bulk_args &args) {
+      int _size = args._size;
+      long double _speed = args._speed;
+      uint64_t _time = args._time;
+      int _type = args._type;
+      //std::cout<<"build_tree_bulk_fmcd "<<std::to_string(args.ratio)<<std::endl;
+      long double ratio = args.ratio < 1 ? 1 : args.ratio;
+      ratio = ratio > 8 ? 8 : ratio;
+      ratio = 1;
+      RT_ASSERT(_size > 1);
+
+
+      typedef struct {
+          int begin;
+          int end;
+          int level; // top level = 1
+          Node *node;
+          long double speed;
+      } Segment;
+      std::stack <Segment> s;
+
+      Node *ret = new_nodes(1);
+      s.push((Segment) {0, _size, 1, ret, _speed});
+
+      while (!s.empty()) {
+        const int begin = s.top().begin;
+        const int end = s.top().end;
+        const int level = s.top().level;
+        long double speed = s.top().speed;
+        //std::cout<<"fmcd _speed "<<speed<<std::endl;
+        Node *node = s.top().node;
+        s.pop();
+        RT_ASSERT(end - begin >= 2);
+        if (end - begin == 2) {
+          Node *_ = build_tree_two((*_keys)[begin], (*_values)[begin], (*_keys)[begin + 1],
+                                   (*_values)[begin + 1], speed, _time, _type);
+          memcpy(node, _, sizeof(Node));
+          delete_nodes(_, 1);
+        } else {
+          T *keys = &((*_keys)[begin]);
+          P *values = &((*_values)[begin]);
+          const int size = end - begin;
+          const int BUILD_GAP_CNT = compute_gap_count(size);
+
+          node->is_two = 0;
+          node->build_size = size;
+          node->size = size;
+          node->fixed = 0;
+          //node->num_inserts = node->num_insert_to_data = 0;
+
+          //prob
+          if (node->build_size < 64) {
+            node->p_conflict = 1 / (0.1 * 2 * 64);
+          } else {
+            node->p_conflict = 1 / (0.1 * 2 * node->build_size);
+          }
+          node->conflict_distribution = std::bernoulli_distribution(node->p_conflict);
+          node->build_time = _time;
+          node->speed = speed;
+          node->last_adjust_type = _type;
+          node->num_items = size * static_cast<int>(BUILD_GAP_CNT + 1);
+          node->model.type = 1;
+          long double mid_target;
+          if (size == 3) {
+            node->model.mid = static_cast<long double>(keys[size / 2]);
+            mid_target = static_cast<long double>(node->num_items - 1) *
+                         (1 - (node->model.mid - static_cast<long double>(keys[0])) / (keys[size - 1] - keys[0]));
+          } else {
+            int left, right;
+            T max = 0;
+            for (int i = 1; i < size; i++) {
+              T diff = keys[i] - keys[i - 1];
+              if (diff > max) {
+                left = i - 1;
+                right = i;
+                max = diff;
+              } else if (diff == max) {
+                right = i;
+              }
+            }
+            node->model.mid = (static_cast<long double>(keys[left]) + static_cast<long double>(keys[right])) / 2;
+            int t = -1;
+            if (right - left == 1) {
+              t = left;
+            } else {
+              int t_l = left;
+              int t_r = right + 1;
+              while (t_l < t_r) {
+                int t_mid = t_l + (t_r - t_l) / 2;
+                if (keys[t_mid] == node->model.mid) {
+                  t = t_mid - 1;
+                  break;
+                } else if (keys[t_mid] < node->model.mid) {
+                  t_l = t_mid + 1;
+                } else {
+                  t_r = t_mid;
+                }
+              }
+              if (t == -1) {
+                t = t_r - 1;
+              }
+            }
+            mid_target = static_cast<long double>(node->num_items - 1) * ((long double) (t + 1) / (size));
+          }
+
+          node->model.a1 = (mid_target) / (node->model.mid - static_cast<long double>(keys[0]));
+          node->model.b1 = (mid_target) - node->model.a1 * node->model.mid;
+          node->model.a2 = (static_cast<long double>(node->num_items) - 1 - mid_target) /
+                           (static_cast<long double>(keys[size - 1] - node->model.mid));
+          node->model.b2 = mid_target - node->model.a2 * node->model.mid;
+
+
+          const int lr_remains = static_cast<int>(size * BUILD_LR_REMAIN);
+          node->num_items += lr_remains * 2;
+          node->model.b1 += lr_remains;
+          node->model.b2 += lr_remains;
+
+          if (size > 1e6) {
+            node->fixed = 1;
+          }
+
+          //std::cout<<"!!!!!!!!!!!!!!"<<node->num_items<<std::endl;
+          node->items = new_items(node->num_items);
+
+          for (int item_i = PREDICT_POS(node, keys[0]), offset = 0; offset < size;) {
+            int next = offset + 1, next_i = -1;
+            while (next < size) {
+              next_i = PREDICT_POS(node, keys[next]);
+              //std::cout<<std::to_string(keys[next])<<" next_i: "<<next_i<<"\n";
+              if (next_i == item_i) {
+                next++;
+              } else {
+                break;
+              }
+            }
+            if (next == offset + 1) {
+              node->items[item_i].entry_type = 2;
+              node->items[item_i].comp.data.key = keys[offset];
+              node->items[item_i].comp.data.value = values[offset];
+            } else {
+              // RT_ASSERT(next - offset <= (size+2) / 3);
+              node->items[item_i].entry_type = 1;
+              node->items[item_i].comp.child = new_nodes(1);
+              s.push((Segment) {begin + offset, begin + next, level + 1, node->items[item_i].comp.child,
+                                speed / node->num_items});
+              /*if(speed / node->num_items ==0){
+                std::cout<<"speed == 0 parent_speed: "<<speed<<"num_items: "<<std::to_string(node->num_items)<<std::endl;
+              }*/
+            }
+            if (next >= size) {
+              break;
+            } else {
+              item_i = next_i;
+              offset = next;
+            }
+          }
+        }
+      }
+
+      return ret;
+    }
+
     /// bulk build, _keys must be sorted in asc order.
     /// FMCD method.
     Node *
@@ -2291,14 +2370,14 @@ private:
           // should be less than 1 / U_T. So we added a small number (1e-6) to
           // U_T. In fact, it has only a negligible impact of the performance.
           {
-            int L = static_cast<int>(size * ( BUILD_GAP_CNT + 1 + tmp_ratio));
+            int L = static_cast<int>(size * (BUILD_GAP_CNT + 1 + tmp_ratio));
             int i = 0;
             int D = 1;
             RT_ASSERT(D <= size - 1 - D);
             long double Ut = (static_cast<long double>(keys[size - 1 - D]) -
-                         static_cast<long double>(keys[D])) /
-                        (static_cast<double>(L - 2)) +
-                        1e-6;
+                              static_cast<long double>(keys[D])) /
+                             (static_cast<double>(L - 2)) +
+                             1e-6;
             while (i < size - 1 - D) {
               while (i + D < size && keys[i + D] - keys[i] >= Ut) {
                 i++;
@@ -2318,14 +2397,14 @@ private:
             if (D * 3 <= size) {
               stats.fmcd_success_times++;
 
-              node->model.a = 1.0 / Ut;
-              node->model.b =
+              node->model.a1 = 1.0 / Ut;
+              node->model.b1 =
                   (L -
-                   node->model.a * (static_cast<long double>(keys[size - 1 - D]) +
-                                    static_cast<long double>(keys[D]))) /
+                   node->model.a1 * (static_cast<long double>(keys[size - 1 - D]) +
+                                     static_cast<long double>(keys[D]))) /
                   2;
-              RT_ASSERT(isfinite(node->model.a));
-              RT_ASSERT(isfinite(node->model.b));
+              RT_ASSERT(isfinite(node->model.a1));
+              RT_ASSERT(isfinite(node->model.b1));
               node->num_items = L;
             } else {
               stats.fmcd_broken_times++;
@@ -2349,26 +2428,27 @@ private:
               node->num_items = L;
               //node->num_items = size * static_cast<int>(BUILD_GAP_CNT + 1);
               const double mid1_target =
-                  mid1_pos * static_cast<int>(BUILD_GAP_CNT + 1 +tmp_ratio) +
-                  static_cast<int>(BUILD_GAP_CNT + 1+tmp_ratio) / 2;
+                  mid1_pos * static_cast<int>(BUILD_GAP_CNT + 1 + tmp_ratio) +
+                  static_cast<int>(BUILD_GAP_CNT + 1 + tmp_ratio) / 2;
               const double mid2_target =
-                  mid2_pos * static_cast<int>(BUILD_GAP_CNT + 1+tmp_ratio) +
-                  static_cast<int>(BUILD_GAP_CNT + 1+tmp_ratio) / 2;
+                  mid2_pos * static_cast<int>(BUILD_GAP_CNT + 1 + tmp_ratio) +
+                  static_cast<int>(BUILD_GAP_CNT + 1 + tmp_ratio) / 2;
 
-              node->model.a = (mid2_target - mid1_target) / (mid2_key - mid1_key);
-              node->model.b = mid1_target - node->model.a * mid1_key;
-              RT_ASSERT(isfinite(node->model.a));
-              RT_ASSERT(isfinite(node->model.b));
+              node->model.a1 = (mid2_target - mid1_target) / (mid2_key - mid1_key);
+              node->model.b1 = mid1_target - node->model.a1 * mid1_key;
+              RT_ASSERT(isfinite(node->model.a1));
+              RT_ASSERT(isfinite(node->model.b1));
             }
           }
 
           /*std::cout<<"build_tree_bulk_fmcd 1 "<<std::to_string(node->num_items)<<std::endl;
           std::cout<<"build_tree_bulk_fmcd 2 "<<std::to_string(size * static_cast<int>(BUILD_GAP_CNT + 1))<<std::endl;
           std::cout<<"build_tree_bulk_fmcd 3 "<<std::to_string(static_cast<int>(ratio))<<std::endl;*/
-          RT_ASSERT(node->model.a >= 0);
+          RT_ASSERT(node->model.a1 >= 0);
           const int lr_remains = static_cast<int>(size * BUILD_LR_REMAIN);
-          node->model.b += lr_remains;
+          node->model.b1 += lr_remains;
           node->num_items += lr_remains * 2;
+          node->model.type = 0;
 
           if (size > 1e6) {
             node->fixed = 1;
@@ -3206,7 +3286,7 @@ private:
           if (node->items[lower_pos].entry_type == 2) {
             results[pos] = {node->items[lower_pos].comp.data.key, node->items[lower_pos].comp.data.value};
             pos++;
-          }else if(node->items[lower_pos].entry_type == 1){
+          } else if (node->items[lower_pos].entry_type == 1) {
             pos = range_core_len < true > (results, pos, node->items[lower_pos].comp.child, lower, len);
           }
           if (pos >= len) {
@@ -3228,7 +3308,7 @@ private:
         //uint64_t versionItem;
 
         int lower_pos = PREDICT_POS(node, lower);
-        if(node->last_adjust_type==3){
+        if (node->last_adjust_type == 3) {
           lower_pos = get_real_pos_from_compressed_node(node, lower_pos, lower);
         }
         /*versionItem = node->items[lower_pos].readLockOrRestart(needRestart);
@@ -3258,7 +3338,7 @@ private:
         lower_pos++;
         while (lower_pos < node->num_items) {
           if (node->items[lower_pos].entry_type != 0) {
-            if (node->items[lower_pos].entry_type==2) {
+            if (node->items[lower_pos].entry_type == 2) {
               results[pos] = {node->items[lower_pos].comp.data.key, node->items[lower_pos].comp.data.value};
               pos++;
             } else {
