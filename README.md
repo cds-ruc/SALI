@@ -24,7 +24,7 @@ make
 ```
 
 
-To enable the evolving strategy, please modify the following parameters in the 'src/core/sali.h':
+To enable the evolving strategy, please modify the following parameters in `src/core/sali.h`:
 
 - Enabling read-evolving:
 
@@ -39,17 +39,18 @@ To enable the evolving strategy, please modify the following parameters in the '
 #define COMPRESS 1
 ```
 
+
 Note that there is no need to disable insert evolving, just like in learned indexes where the retraining does not need to be turned off.
 
 
 ## Usage
 
-`src/examples/example_multithread.cpp` shows how to use sali in multithread environment.
+`src/examples/example_multithread.cpp` demonstrates the usage of SALI in a multithreaded environment.
 
 ## Running benchmark
 
 
-SALI's performance can be assessed using the GRE benchmarking tool. We have integrated SALI into GRE as "GRE_SALI," which is a fork of GRE, and you can access it at the following link: https://github.com/YunWorkshop/GRE_SALI.
+SALI's performance can be assessed using the GRE benchmarking tool. We have integrated SALI into GRE as "[GRE_SALI](https://github.com/YunWorkshop/GRE_SALI)," which is a fork of GRE. In GRE_SALI, you can assess the performance of SALI comprehensively.
 
 Note that for additional features, we have introduced additional flags in GRE_SALI:
 
