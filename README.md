@@ -17,22 +17,23 @@ cmake ..
 make
 ```
 
-Run example:
+- Run example:
 
 ```bash
 ./build/example_mt
 ```
 
-To enable the evolving strategy, please modify the following parameters in the src/core/sali.h directory:
 
-Enabling read-evolving：
+To enable the evolving strategy, please modify the following parameters in the 'src/core/sali.h':
+
+- Enabling read-evolving:
 
 ```bash
 #define READ_EVOLVE 1
 ```
 
 
-Enabling space compression：
+- Enabling space compression:
 
 ```bash
 #define COMPRESS 1
@@ -52,19 +53,19 @@ SALI's performance can be assessed using the GRE benchmarking tool. We have inte
 
 Note that for additional features, we have introduced additional flags in GRE_SALI:
 
-- Enable Lookup Skewed Workload:
+- Enable skewed workload for lookup:
 
 ```bash
 --sample_distribution=zipf
 ```
 
-- Enable Insert Skewed Workload:
+- Enable skewed workload for insert:
 
 ```bash
 --hot_write=1
 ```
 
-Other test configurations, such as workloads and datasets, are left to your discretion for evaluation. For more details on these configurations, please refer to [GRE](https://github.com/YunWorkshop/GRE_SALI).
+Other configurations, such as workloads and datasets, are left to your discretion for evaluation. For more details on these configurations, please refer to [GRE](https://github.com/YunWorkshop/GRE_SALI).
 
 
 ## Acknowledgements
