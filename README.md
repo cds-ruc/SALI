@@ -45,7 +45,40 @@ Note that there is no need to disable insert evolving, just like in learned inde
 
 ## Usage
 
-`src/examples/example_multithread.cpp` demonstrates the usage of SALI in a multithreaded environment.
+`src/examples/example_multithread.cpp` demonstrates the usage of SALI in a multithreaded environment:
+
+
+```bash
+#include <iostream>
+#include <sali.h>
+#include "omp.h"
+
+using namespace std;
+
+int main() {
+  sali::SALI<int, int> sali;
+
+  int key_num = 1000;
+  pair<int, int> *keys = new pair<int, int>[key_num];
+  for (int i = 0; i < 1000; i++) {
+    keys[i]={i,i};
+  }
+  sali.bulk_load(keys, 1000);
+
+  omp_set_num_threads(12);
+
+#pragma omp parallel for schedule(static, 12)
+  for (int i = 1000; i < 2000; i++) {
+    sali.insert(i,i);
+  }
+#pragma omp parallel for schedule(static, 12)
+  for (int i = 0; i < 2000; i++) {
+    std::cout<<"value at "<<i<<": "<<sali.at(i)<<std::endl;
+  }
+
+  return 0;
+}
+```
 
 ## Running benchmark
 
@@ -69,8 +102,13 @@ Note that for additional features, we have introduced additional flags in GRE_SA
 Other configurations, such as workloads and datasets, are left to your discretion for evaluation. For more details on these configurations, please refer to [GRE](https://github.com/YunWorkshop/GRE_SALI).
 
 
+## License
+
+This project is licensed under the terms of the MIT License.
+
+
 ## Acknowledgements
 
-- The index structure chosen to evaluate the effectiveness of SALI is LIPP, and our implementation is based on the code of [LIPP](https://github.com/Jiacheng-WU/lipp).
-- The benchmark used to evaluate this paper is [GRE](https://github.com/gre4index/GRE).
-
+- The LIPP structure is chosen to evaluate the effectiveness of SALI framework, and our implementation is based on the code of [LIPP](https://github.com/Jiacheng-WU/lipp).
+- SALI utilize the PLA algorithm of the [PGM](https://github.com/gvinciguerra/PGM-index), which is used to construct the PGM. 
+- The benchmark used to evaluate the SALI is [GRE](https://github.com/gre4index/GRE).
