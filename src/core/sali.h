@@ -288,8 +288,8 @@ public:
               for (int i = 0; i < node->num_items; i++) node->items[i].entry_type = 0;
               tree->pending_two[omp_get_thread_num()].push(node);
             } else {
-              freed += node->num_items * sizeof(Item);
-              freed += sizeof(Node);
+              freed_size += node->num_items * sizeof(Item);
+              freed_size += sizeof(Node);
               tree->delete_items(node->items, node->num_items);
               tree->delete_nodes(node, 1);
             }
