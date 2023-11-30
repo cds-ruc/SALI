@@ -1545,7 +1545,7 @@ private:
 
     }
 
-    EpochBasedMemoryReclamationStrategy *initEbrInstance(LIPP<T, P> *index) {
+    EpochBasedMemoryReclamationStrategy *initEbrInstance(SALI<T, P> *index) {
       ebr = new EpochBasedMemoryReclamationStrategy(index);
       return ebr;
     }
