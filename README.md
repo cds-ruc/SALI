@@ -96,7 +96,7 @@ Note that for additional features, we have introduced additional flags in GRE_SA
 - Enable skewed workload for insert:
 
 ```bash
---hot_write=1
+--hot_write=true
 ```
 
 Other configurations, such as workloads and datasets, are left to your discretion for evaluation. For more details on these configurations, please refer to [GRE](https://github.com/YunWorkshop/GRE_SALI).
