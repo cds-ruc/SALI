@@ -22,7 +22,9 @@ int main() {
   }
 #pragma omp parallel for schedule(static, 12)
   for (int i = 0; i < 2000; i++) {
-    std::cout<<"value at "<<i<<": "<<sali.at(i)<<std::endl;
+    int val = 0;
+    sali.at(i, val);
+    std::cout<<"value at "<<i<<": "<<val<<std::endl;
   }
 
   return 0;
